@@ -144,6 +144,10 @@ UseInfo TruncatingUseInfoFromRepresentation(MachineRepresentation rep) {
       return UseInfo::Word64();
     case MachineRepresentation::kBit:
       return UseInfo::Bool();
+      // TODO(solanes): Create the code for the compressed values
+    case MachineRepresentation::kCompressedSigned:
+    case MachineRepresentation::kCompressedPointer:
+    case MachineRepresentation::kCompressed:
     case MachineRepresentation::kSimd128:
     case MachineRepresentation::kNone:
       break;
@@ -1041,7 +1045,8 @@ class RepresentationSelector {
                 MachineRepresentation::kTaggedPointer);
       if (lower()) DeferReplacement(node, node->InputAt(0));
     } else {
-      VisitUnop(node, UseInfo::CheckedHeapObjectAsTaggedPointer(),
+      VisitUnop(node,
+                UseInfo::CheckedHeapObjectAsTaggedPointer(VectorSlotPair()),
                 MachineRepresentation::kTaggedPointer);
     }
   }
@@ -1527,9 +1532,10 @@ class RepresentationSelector {
     if (node->op()->ValueOutputCount() > 0 &&
         node->op()->EffectOutputCount() > 0 &&
         node->opcode() != IrOpcode::kUnreachable && TypeOf(node).IsNone()) {
-      Node* control = node->op()->ControlOutputCount() > 0
-                          ? node
-                          : NodeProperties::GetControlInput(node, 0);
+      Node* control =
+          (node->op()->ControlOutputCount() == 0)
+              ? NodeProperties::GetControlInput(node, 0)
+              : NodeProperties::FindSuccessfulControlProjection(node);
 
       Node* unreachable =
           graph()->NewNode(common()->Unreachable(), node, control);
@@ -1537,9 +1543,18 @@ class RepresentationSelector {
       // Insert unreachable node and replace all the effect uses of the {node}
       // with the new unreachable node.
       for (Edge edge : node->use_edges()) {
-        if (NodeProperties::IsEffectEdge(edge) && edge.from() != unreachable) {
-          edge.UpdateTo(unreachable);
+        if (!NodeProperties::IsEffectEdge(edge)) continue;
+        // Make sure to not overwrite the unreachable node's input. That would
+        // create a cycle.
+        if (edge.from() == unreachable) continue;
+        // Avoid messing up the exceptional path.
+        if (edge.from()->opcode() == IrOpcode::kIfException) {
+          DCHECK(!node->op()->HasProperty(Operator::kNoThrow));
+          DCHECK_EQ(NodeProperties::GetControlInput(edge.from()), node);
+          continue;
         }
+
+        edge.UpdateTo(unreachable);
       }
     }
   }
@@ -1556,6 +1571,8 @@ class RepresentationSelector {
         VisitBinop(node, UseInfo::TruncatingWord32(),
                    MachineRepresentation::kWord32);
         if (lower()) {
+          CheckBoundsParameters::Mode mode =
+              CheckBoundsParameters::kDeoptOnOutOfBounds;
           if (lowering->poisoning_level_ ==
                   PoisoningMitigationLevel::kDontPoison &&
               (index_type.IsNone() || length_type.IsNone() ||
@@ -1563,11 +1580,10 @@ class RepresentationSelector {
                 index_type.Max() < length_type.Min()))) {
             // The bounds check is redundant if we already know that
             // the index is within the bounds of [0.0, length[.
-            DeferReplacement(node, node->InputAt(0));
-          } else {
-            NodeProperties::ChangeOp(
-                node, simplified()->CheckedUint32Bounds(p.feedback()));
+            mode = CheckBoundsParameters::kAbortOnOutOfBounds;
           }
+          NodeProperties::ChangeOp(
+              node, simplified()->CheckedUint32Bounds(p.feedback(), mode));
         }
       } else {
         VisitBinop(
@@ -1576,7 +1592,9 @@ class RepresentationSelector {
             UseInfo::TruncatingWord32(), MachineRepresentation::kWord32);
         if (lower()) {
           NodeProperties::ChangeOp(
-              node, simplified()->CheckedUint32Bounds(p.feedback()));
+              node,
+              simplified()->CheckedUint32Bounds(
+                  p.feedback(), CheckBoundsParameters::kDeoptOnOutOfBounds));
         }
       }
     } else {
@@ -2653,7 +2671,8 @@ class RepresentationSelector {
           VisitUnop(node, UseInfo::AnyTagged(),
                     MachineRepresentation::kTaggedPointer);
         } else {
-          VisitUnop(node, UseInfo::CheckedHeapObjectAsTaggedPointer(),
+          VisitUnop(node,
+                    UseInfo::CheckedHeapObjectAsTaggedPointer(VectorSlotPair()),
                     MachineRepresentation::kTaggedPointer);
         }
         if (lower()) DeferReplacement(node, node->InputAt(0));
@@ -2703,7 +2722,17 @@ class RepresentationSelector {
         return;
       }
       case IrOpcode::kCheckString: {
-        VisitCheck(node, Type::String(), lowering);
+        const CheckParameters& params = CheckParametersOf(node->op());
+        if (InputIs(node, Type::String())) {
+          VisitUnop(node, UseInfo::AnyTagged(),
+                    MachineRepresentation::kTaggedPointer);
+          if (lower()) DeferReplacement(node, node->InputAt(0));
+        } else {
+          VisitUnop(
+              node,
+              UseInfo::CheckedHeapObjectAsTaggedPointer(params.feedback()),
+              MachineRepresentation::kTaggedPointer);
+        }
         return;
       }
       case IrOpcode::kCheckSymbol: {
@@ -2715,6 +2744,18 @@ class RepresentationSelector {
         ProcessInput(node, 0, UseInfo::Word());
         ProcessRemainingInputs(node, 1);
         SetOutput(node, MachineRepresentation::kTaggedPointer);
+        return;
+      }
+      case IrOpcode::kLoadMessage: {
+        if (truncation.IsUnused()) return VisitUnused(node);
+        VisitUnop(node, UseInfo::Word(), MachineRepresentation::kTagged);
+        return;
+      }
+      case IrOpcode::kStoreMessage: {
+        ProcessInput(node, 0, UseInfo::Word());
+        ProcessInput(node, 1, UseInfo::AnyTagged());
+        ProcessRemainingInputs(node, 2);
+        SetOutput(node, MachineRepresentation::kNone);
         return;
       }
       case IrOpcode::kLoadFieldByIndex: {
@@ -2766,6 +2807,11 @@ class RepresentationSelector {
         ElementAccess access = ElementAccessOf(node->op());
         VisitBinop(node, UseInfoForBasePointer(access), UseInfo::Word(),
                    access.machine_type.representation());
+        return;
+      }
+      case IrOpcode::kLoadStackArgument: {
+        if (truncation.IsUnused()) return VisitUnused(node);
+        VisitBinop(node, UseInfo::Word(), MachineRepresentation::kTagged);
         return;
       }
       case IrOpcode::kStoreElement: {

@@ -25,13 +25,13 @@ class ValueSerializer;
 class BigIntBase : public HeapObject {
  public:
   inline int length() const {
-    int32_t bitfield = RELAXED_READ_INT32_FIELD(this, kBitfieldOffset);
+    int32_t bitfield = RELAXED_READ_INT32_FIELD(*this, kBitfieldOffset);
     return LengthBits::decode(static_cast<uint32_t>(bitfield));
   }
 
   // For use by the GC.
   inline int synchronized_length() const {
-    int32_t bitfield = ACQUIRE_READ_INT32_FIELD(this, kBitfieldOffset);
+    int32_t bitfield = ACQUIRE_READ_INT32_FIELD(*this, kBitfieldOffset);
     return LengthBits::decode(static_cast<uint32_t>(bitfield));
   }
 
@@ -81,13 +81,13 @@ class BigIntBase : public HeapObject {
 
   // sign() == true means negative.
   inline bool sign() const {
-    int32_t bitfield = RELAXED_READ_INT32_FIELD(this, kBitfieldOffset);
+    int32_t bitfield = RELAXED_READ_INT32_FIELD(*this, kBitfieldOffset);
     return SignBits::decode(static_cast<uint32_t>(bitfield));
   }
 
   inline digit_t digit(int n) const {
     SLOW_DCHECK(0 <= n && n < length());
-    Address address = FIELD_ADDR(this, kDigitsOffset + n * kDigitSize);
+    Address address = FIELD_ADDR(*this, kDigitsOffset + n * kDigitSize);
     return *reinterpret_cast<digit_t*>(address);
   }
 
@@ -181,6 +181,8 @@ class V8_EXPORT_PRIVATE BigInt : public BigIntBase {
     return is_zero() ? 0 : ComputeLongHash(static_cast<uint64_t>(digit(0)));
   }
 
+  bool IsNegative() const { return sign(); }
+
   static bool EqualToString(Isolate* isolate, Handle<BigInt> x,
                             Handle<String> y);
   static bool EqualToNumber(Handle<BigInt> x, Handle<Object> y);
@@ -239,7 +241,7 @@ class V8_EXPORT_PRIVATE BigInt : public BigIntBase {
   static Handle<BigInt> Zero(Isolate* isolate);
   static MaybeHandle<FreshlyAllocatedBigInt> AllocateFor(
       Isolate* isolate, int radix, int charcount, ShouldThrow should_throw,
-      PretenureFlag pretenure);
+      AllocationType allocation);
   static void InplaceMultiplyAdd(Handle<FreshlyAllocatedBigInt> x,
                                  uintptr_t factor, uintptr_t summand);
   static Handle<BigInt> Finalize(Handle<FreshlyAllocatedBigInt> x, bool sign);
@@ -252,7 +254,7 @@ class V8_EXPORT_PRIVATE BigInt : public BigIntBase {
   void SerializeDigits(uint8_t* storage);
   V8_WARN_UNUSED_RESULT static MaybeHandle<BigInt> FromSerializedDigits(
       Isolate* isolate, uint32_t bitfield, Vector<const uint8_t> digits_storage,
-      PretenureFlag pretenure);
+      AllocationType allocation);
 
   OBJECT_CONSTRUCTORS(BigInt, BigIntBase);
 };

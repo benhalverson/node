@@ -90,6 +90,13 @@ TF_BUILTIN(WasmStackGuard, WasmBuiltinsAssembler) {
   TailCallRuntimeWithCEntry(Runtime::kWasmStackGuard, centry, context);
 }
 
+TF_BUILTIN(WasmStackOverflow, WasmBuiltinsAssembler) {
+  TNode<Object> instance = LoadInstanceFromFrame();
+  TNode<Code> centry = LoadCEntryFromInstance(instance);
+  TNode<Object> context = LoadContextFromInstance(instance);
+  TailCallRuntimeWithCEntry(Runtime::kThrowWasmStackOverflow, centry, context);
+}
+
 TF_BUILTIN(WasmThrow, WasmBuiltinsAssembler) {
   TNode<Object> exception = UncheckedParameter(Descriptor::kException);
   TNode<Object> instance = LoadInstanceFromFrame();
@@ -98,7 +105,7 @@ TF_BUILTIN(WasmThrow, WasmBuiltinsAssembler) {
   TailCallRuntimeWithCEntry(Runtime::kThrow, centry, context, exception);
 }
 
-TF_BUILTIN(WasmAtomicWake, WasmBuiltinsAssembler) {
+TF_BUILTIN(WasmAtomicNotify, WasmBuiltinsAssembler) {
   TNode<Uint32T> address =
       UncheckedCast<Uint32T>(Parameter(Descriptor::kAddress));
   TNode<Uint32T> count = UncheckedCast<Uint32T>(Parameter(Descriptor::kCount));
@@ -118,7 +125,7 @@ TF_BUILTIN(WasmAtomicWake, WasmBuiltinsAssembler) {
   StoreHeapNumberValue(count_heap, ChangeUint32ToFloat64(count));
 
   TNode<Smi> result_smi = UncheckedCast<Smi>(CallRuntimeWithCEntry(
-      Runtime::kWasmAtomicWake, centry, NoContextConstant(), instance,
+      Runtime::kWasmAtomicNotify, centry, NoContextConstant(), instance,
       address_heap, count_heap));
   ReturnRaw(SmiToInt32(result_smi));
 }

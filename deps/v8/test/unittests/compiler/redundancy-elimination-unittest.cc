@@ -35,8 +35,10 @@ class RedundancyEliminationTest : public GraphTest {
         isolate()->factory()->NewSharedFunctionInfoForBuiltin(
             isolate()->factory()->empty_string(), Builtins::kIllegal);
     shared->set_raw_outer_scope_info_or_feedback_metadata(*metadata);
+    Handle<FixedArray> closure_feedback_cell_array =
+        FeedbackVector::NewClosureFeedbackCellArray(isolate(), shared);
     Handle<FeedbackVector> feedback_vector =
-        FeedbackVector::New(isolate(), shared);
+        FeedbackVector::New(isolate(), shared, closure_feedback_cell_array);
     vector_slot_pairs_.push_back(VectorSlotPair());
     vector_slot_pairs_.push_back(
         VectorSlotPair(feedback_vector, slot1, UNINITIALIZED));
@@ -668,16 +670,18 @@ TEST_F(RedundancyEliminationTest, CheckedUint32Bounds) {
       Node* effect = graph()->start();
       Node* control = graph()->start();
 
-      Node* check1 = effect =
-          graph()->NewNode(simplified()->CheckedUint32Bounds(feedback1), index,
-                           length, effect, control);
+      Node* check1 = effect = graph()->NewNode(
+          simplified()->CheckedUint32Bounds(
+              feedback1, CheckBoundsParameters::kDeoptOnOutOfBounds),
+          index, length, effect, control);
       Reduction r1 = Reduce(check1);
       ASSERT_TRUE(r1.Changed());
       EXPECT_EQ(r1.replacement(), check1);
 
-      Node* check2 = effect =
-          graph()->NewNode(simplified()->CheckedUint32Bounds(feedback2), index,
-                           length, effect, control);
+      Node* check2 = effect = graph()->NewNode(
+          simplified()->CheckedUint32Bounds(
+              feedback2, CheckBoundsParameters::kDeoptOnOutOfBounds),
+          index, length, effect, control);
       Reduction r2 = Reduce(check2);
       ASSERT_TRUE(r2.Changed());
       EXPECT_EQ(r2.replacement(), check1);

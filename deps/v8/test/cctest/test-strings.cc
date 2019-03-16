@@ -37,6 +37,7 @@
 #include "src/api-inl.h"
 #include "src/base/platform/elapsed-timer.h"
 #include "src/heap/factory.h"
+#include "src/heap/heap-inl.h"
 #include "src/messages.h"
 #include "src/objects-inl.h"
 #include "src/unicode-decoder.h"
@@ -1425,7 +1426,7 @@ TEST(InternalizeExternal) {
     Handle<String> string = v8::Utils::OpenHandle(*ext_string);
     CHECK(string->IsExternalString());
     CHECK(!string->IsInternalizedString());
-    CHECK(!i::Heap::InNewSpace(*string));
+    CHECK(!i::Heap::InYoungGeneration(*string));
     CHECK_EQ(
         isolate->factory()->string_table()->LookupStringIfExists_NoAllocate(
             isolate, string->ptr()),
@@ -1433,7 +1434,7 @@ TEST(InternalizeExternal) {
     factory->InternalizeName(string);
     CHECK(string->IsExternalString());
     CHECK(string->IsInternalizedString());
-    CHECK(!i::Heap::InNewSpace(*string));
+    CHECK(!i::Heap::InYoungGeneration(*string));
   }
   CcTest::CollectGarbage(i::OLD_SPACE);
   CcTest::CollectGarbage(i::OLD_SPACE);
@@ -1738,8 +1739,8 @@ TEST(FormatMessage) {
   Handle<String> arg1 = isolate->factory()->NewStringFromAsciiChecked("arg1");
   Handle<String> arg2 = isolate->factory()->NewStringFromAsciiChecked("arg2");
   Handle<String> result =
-      MessageFormatter::FormatMessage(
-          isolate, MessageTemplate::kPropertyNotFunction, arg0, arg1, arg2)
+      MessageFormatter::Format(isolate, MessageTemplate::kPropertyNotFunction,
+                               arg0, arg1, arg2)
           .ToHandleChecked();
   Handle<String> expected = isolate->factory()->NewStringFromAsciiChecked(
       "'arg0' returned for property 'arg1' of object 'arg2' is not a function");
@@ -1817,7 +1818,7 @@ TEST(ExternalStringIndexOf) {
             ->NewStringFromOneByte(Vector<const uint8_t>(                      \
                 reinterpret_cast<const uint8_t*>(buf), len))                   \
             .ToHandleChecked();                                                \
-    CHECK(Heap::InNewSpace(*main_string));                                     \
+    CHECK(Heap::InYoungGeneration(*main_string));                              \
     /* Next allocation will cause GC. */                                       \
     heap::SimulateFullSpace(CcTest::i_isolate()->heap()->new_space());         \
     /* Offset by two to check substring-ing. */                                \
