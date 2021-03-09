@@ -25,6 +25,7 @@ const { promises: fs } = require('fs');
 const path = require('path');
 const unified = require('unified');
 const markdown = require('remark-parse');
+const frontmatter = require('remark-frontmatter');
 const gfm = require('remark-gfm');
 const remark2rehype = require('remark-rehype');
 const raw = require('rehype-raw');
@@ -81,6 +82,7 @@ async function main() {
   const input = await fs.readFile(filename, 'utf8');
 
   const content = await unified()
+    .use(frontmatter)
     .use(replaceLinks, { filename, linksMapper })
     .use(markdown)
     .use(gfm)
